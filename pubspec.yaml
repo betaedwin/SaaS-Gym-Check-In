@@ -1,0 +1,16 @@
+name: saas_gym_check_in
+description: MVP gym check-in app.
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: any
+  flutter_riverpod: any
+
+flutter:
+  uses-material-design: true
