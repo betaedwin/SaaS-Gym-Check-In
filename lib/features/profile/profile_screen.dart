@@ -7,18 +7,21 @@ import '../../core/logging.dart';
 class _Profile {
   const _Profile({
     required this.id,
-    required this.name,
+    required this.email,
+    required this.fullName,
     required this.belt,
   });
 
   final String id;
-  final String name;
+  final String email;
+  final String fullName;
   final String belt;
 
   factory _Profile.fromJson(Map<String, dynamic> json) {
     return _Profile(
       id: (json['id'] as String?) ?? '',
-      name: (json['name'] as String?) ?? '',
+      email: (json['email'] as String?) ?? '',
+      fullName: (json['full_name'] as String?) ?? '',
       belt: (json['belt'] as String?) ?? '',
     );
   }
@@ -32,7 +35,7 @@ final _profileProvider = FutureProvider.autoDispose<_Profile>((ref) async {
 
   final data = await Supabase.instance.client
       .from('profiles')
-      .select('id,name,belt')
+      .select('id,email,full_name,belt')
       .eq('id', user.id)
       .single();
 
@@ -84,13 +87,17 @@ class ProfileScreen extends ConsumerWidget {
           ),
           data: (profile) {
             final userId = Supabase.instance.client.auth.currentUser?.id ?? profile.id;
+            final authEmail = Supabase.instance.client.auth.currentUser?.email ?? '';
+            final displayEmail = profile.email.isEmpty ? authEmail : profile.email;
             return ListView(
               children: [
                 Text(
-                  profile.name.isEmpty ? 'Unknown user' : profile.name,
+                  profile.fullName.isEmpty ? 'Unknown user' : profile.fullName,
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 12),
+                _Row(label: 'Email', value: displayEmail.isEmpty ? '—' : displayEmail),
+                const SizedBox(height: 8),
                 _Row(label: 'Belt', value: profile.belt.isEmpty ? '—' : profile.belt),
                 const SizedBox(height: 8),
                 _Row(label: 'User ID', value: userId),

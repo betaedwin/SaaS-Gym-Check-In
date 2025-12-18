@@ -39,6 +39,13 @@ class _LoginScreenState extends State<LoginScreen> {
         email: email,
         password: password,
       );
+      // No explicit navigation needed: `AuthGate` listens to auth state changes
+      // and swaps the UI to the authenticated area on success.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Logged in.')),
+        );
+      }
     } on AuthException catch (e, st) {
       logError('Login failed', e, st);
       if (mounted) {
