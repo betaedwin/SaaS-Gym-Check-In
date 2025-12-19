@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -53,10 +55,16 @@ class _CheckInScreenState extends State<CheckInScreen> {
         .order('checked_in_at', ascending: false)
         .limit(7);
 
-    return (rows as List)
+    final list = rows is List ? rows : const [];
+    return list
         .map((row) {
           final map = row as Map<String, dynamic>;
-          final checkedInAt = DateTime.parse(map['checked_in_at'] as String).toLocal();
+          final checkedInAtRaw = map['checked_in_at'];
+          final checkedInAt = switch (checkedInAtRaw) {
+            final String v => DateTime.parse(v).toLocal(),
+            final DateTime v => v.toLocal(),
+            _ => DateTime.now(),
+          };
           final method = (map['method'] as String?) ?? 'unknown';
           return _CheckInHistoryItem(checkedInAt: checkedInAt, method: method);
         })
@@ -88,7 +96,8 @@ class _CheckInScreenState extends State<CheckInScreen> {
         .lt('checked_in_at', endLocal.toUtc().toIso8601String())
         .limit(1);
 
-    return (rows as List).isNotEmpty;
+    final list = rows is List ? rows : const [];
+    return list.isNotEmpty;
   }
 
   Future<void> _insertCheckIn({
@@ -119,7 +128,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
         return;
       }
 
-      final already = await _alreadyCheckedInToday(userId: user.id);
+      final already = await _alreadyCheckedInToday(userId: user.id).timeout(
+        const Duration(seconds: 10),
+      );
       if (already) {
         setState(() => _status = 'Already checked in today.');
         return;
@@ -127,7 +138,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
 
       _attemptedLocationRequest = true;
 
-      final permission = await Geolocator.requestPermission();
+      final permission = await Geolocator.requestPermission().timeout(
+        const Duration(seconds: 15),
+      );
       _locationPermission = permission;
 
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
@@ -137,7 +150,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
         return;
       }
 
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled().timeout(
+        const Duration(seconds: 10),
+      );
       if (!serviceEnabled) {
         setState(() {
           _status = 'Location services are off. Turn them on to check in with GPS.';
@@ -149,6 +164,8 @@ class _CheckInScreenState extends State<CheckInScreen> {
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
         ),
+      ).timeout(
+        const Duration(seconds: 20),
       );
 
       final distance = Geolocator.distanceBetween(
@@ -170,11 +187,15 @@ class _CheckInScreenState extends State<CheckInScreen> {
         method: 'gps',
         lat: position.latitude,
         lng: position.longitude,
-      );
+      ).timeout(const Duration(seconds: 10));
 
       setState(() {
         _status = 'Checked in successfully.';
         _historyFuture = _fetchRecentCheckIns();
+      });
+    } on TimeoutException {
+      setState(() {
+        _status = 'This is taking too long. Try again, or scan the gym QR code to check in.';
       });
     } catch (e) {
       setState(() => _status = 'Check-in failed. ${e.toString()}');
@@ -198,7 +219,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
         return;
       }
 
-      final already = await _alreadyCheckedInToday(userId: user.id);
+      final already = await _alreadyCheckedInToday(userId: user.id).timeout(
+        const Duration(seconds: 10),
+      );
       if (already) {
         setState(() => _status = 'Already checked in today.');
         return;
@@ -222,12 +245,14 @@ class _CheckInScreenState extends State<CheckInScreen> {
         method: 'qr',
         lat: null,
         lng: null,
-      );
+      ).timeout(const Duration(seconds: 10));
 
       setState(() {
         _status = 'Checked in successfully.';
         _historyFuture = _fetchRecentCheckIns();
       });
+    } on TimeoutException {
+      setState(() => _status = 'Check-in is taking too long. Please try again.');
     } catch (e) {
       setState(() => _status = 'Check-in failed. ${e.toString()}');
     } finally {
@@ -356,8 +381,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text('${_formatDate(item.checkedInAt)} • ${_formatTime(item.checkedInAt)}'),
-                        subtitle: Text('Method: $methodLabel'),
+                        title: const Text('Checked in'),
+                        subtitle: Text(
+                          '${_formatDateLabel(item.checkedInAt)} • ${_formatTimeLabel(item.checkedInAt)} • $methodLabel',
+                        ),
                       );
                     },
                   );
@@ -378,12 +405,36 @@ class _CheckInHistoryItem {
   final String method;
 }
 
-String _formatDate(DateTime dateTimeLocal) {
-  String two(int v) => v.toString().padLeft(2, '0');
-  return '${dateTimeLocal.year}-${two(dateTimeLocal.month)}-${two(dateTimeLocal.day)}';
+String _formatDateLabel(DateTime dateTimeLocal) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final date = DateTime(dateTimeLocal.year, dateTimeLocal.month, dateTimeLocal.day);
+
+  if (date == today) return 'Today';
+  if (date == today.subtract(const Duration(days: 1))) return 'Yesterday';
+
+  const months = <String>[
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final month = months[dateTimeLocal.month - 1];
+  return '$month ${dateTimeLocal.day}, ${dateTimeLocal.year}';
 }
 
-String _formatTime(DateTime dateTimeLocal) {
+String _formatTimeLabel(DateTime dateTimeLocal) {
   String two(int v) => v.toString().padLeft(2, '0');
-  return '${two(dateTimeLocal.hour)}:${two(dateTimeLocal.minute)}';
+  final hour24 = dateTimeLocal.hour;
+  final hour12 = switch (hour24 % 12) { 0 => 12, final v => v };
+  final suffix = hour24 < 12 ? 'AM' : 'PM';
+  return '$hour12:${two(dateTimeLocal.minute)} $suffix';
 }
