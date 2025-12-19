@@ -22,10 +22,51 @@ class _CheckInScreenState extends State<CheckInScreen> {
   LocationPermission _locationPermission = LocationPermission.denied;
   String? _status;
 
+  late Future<List<_CheckInHistoryItem>> _historyFuture;
+
   @override
   void initState() {
     super.initState();
     _refreshLocationPermission();
+    _historyFuture = _fetchRecentCheckIns();
+  }
+
+  SupabaseClient? _supabaseClientOrNull() {
+    try {
+      return Supabase.instance.client;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<_CheckInHistoryItem>> _fetchRecentCheckIns() async {
+    final client = _supabaseClientOrNull();
+    if (client == null) return const [];
+
+    final user = client.auth.currentUser;
+    if (user == null) return const [];
+
+    final rows = await client
+        .from('check_ins')
+        .select('checked_in_at, method')
+        .eq('user_id', user.id)
+        .order('checked_in_at', ascending: false)
+        .limit(7);
+
+    return (rows as List)
+        .map((row) {
+          final map = row as Map<String, dynamic>;
+          final checkedInAt = DateTime.parse(map['checked_in_at'] as String).toLocal();
+          final method = (map['method'] as String?) ?? 'unknown';
+          return _CheckInHistoryItem(checkedInAt: checkedInAt, method: method);
+        })
+        .toList(growable: false);
+  }
+
+  void _refreshHistory() {
+    setState(() {
+      _historyFuture = _fetchRecentCheckIns();
+    });
   }
 
   Future<void> _refreshLocationPermission() async {
@@ -131,7 +172,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
         lng: position.longitude,
       );
 
-      setState(() => _status = 'Checked in successfully.');
+      setState(() {
+        _status = 'Checked in successfully.';
+        _historyFuture = _fetchRecentCheckIns();
+      });
     } catch (e) {
       setState(() => _status = 'Check-in failed. ${e.toString()}');
     } finally {
@@ -180,7 +224,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
         lng: null,
       );
 
-      setState(() => _status = 'Checked in successfully.');
+      setState(() {
+        _status = 'Checked in successfully.';
+        _historyFuture = _fetchRecentCheckIns();
+      });
     } catch (e) {
       setState(() => _status = 'Check-in failed. ${e.toString()}');
     } finally {
@@ -215,7 +262,6 @@ class _CheckInScreenState extends State<CheckInScreen> {
               ),
               const SizedBox(height: 16),
             ],
-            const Spacer(),
             if (!denied)
               FilledButton(
                 onPressed: _loading ? null : _checkInViaGps,
@@ -244,10 +290,100 @@ class _CheckInScreenState extends State<CheckInScreen> {
                     : const Text('Scan QR Code'),
               ),
             ],
-            const Spacer(),
+            const SizedBox(height: 24),
+            Text(
+              'Recent check-ins',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: FutureBuilder<List<_CheckInHistoryItem>>(
+                future: _historyFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  }
+
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'Unable to load check-in history.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+
+                  final client = _supabaseClientOrNull();
+                  if (client?.auth.currentUser == null) {
+                    return Center(
+                      child: Text(
+                        'Log in to see your check-in history.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+
+                  final items = snapshot.data ?? const [];
+                  if (items.isEmpty) {
+                    return Center(
+                      child: Text(
+                        'No check-ins yet.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      final methodLabel = switch (item.method) {
+                        'gps' => 'GPS',
+                        'qr' => 'QR',
+                        _ => item.method.toUpperCase(),
+                      };
+
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('${_formatDate(item.checkedInAt)} • ${_formatTime(item.checkedInAt)}'),
+                        subtitle: Text('Method: $methodLabel'),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
+
+class _CheckInHistoryItem {
+  const _CheckInHistoryItem({required this.checkedInAt, required this.method});
+
+  final DateTime checkedInAt;
+  final String method;
+}
+
+String _formatDate(DateTime dateTimeLocal) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${dateTimeLocal.year}-${two(dateTimeLocal.month)}-${two(dateTimeLocal.day)}';
+}
+
+String _formatTime(DateTime dateTimeLocal) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(dateTimeLocal.hour)}:${two(dateTimeLocal.minute)}';
 }
