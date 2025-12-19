@@ -11,6 +11,13 @@ dependencies:
     sdk: flutter
   supabase_flutter: any
   flutter_riverpod: any
+  geolocator: any
+  mobile_scanner: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: any
 
 flutter:
   uses-material-design: true
