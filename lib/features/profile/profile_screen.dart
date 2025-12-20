@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/logging.dart';
@@ -33,16 +34,123 @@ final _profileProvider = FutureProvider.autoDispose<_Profile>((ref) async {
     throw Exception('Not authenticated.');
   }
 
-  final data = await Supabase.instance.client
-      .from('profiles')
-      .select('id,email,full_name,belt')
-      .eq('id', user.id)
-      .single();
+  Future<Map<String, dynamic>?> fetch() async {
+    final data = await Supabase.instance.client
+        .from('profiles')
+        .select('id,email,full_name,belt')
+        .eq('id', user.id)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 10));
+    return data == null ? null : Map<String, dynamic>.from(data);
+  }
 
-  final profile = _Profile.fromJson(Map<String, dynamic>.from(data));
+  final data = await fetch();
+  if (data == null) throw Exception('Profile not found. Please try again.');
+
+  final profile = _Profile.fromJson(data);
   if (profile.id.isEmpty) throw Exception('Profile not found.');
   return profile;
 });
+
+class _AttendanceSnapshot {
+  const _AttendanceSnapshot({
+    required this.totalCheckIns,
+    required this.firstCheckInAt,
+    required this.recentVisits,
+  });
+
+  final int totalCheckIns;
+  final DateTime? firstCheckInAt;
+  final List<DateTime> recentVisits;
+
+  DateTime? get lastVisitAt => recentVisits.isEmpty ? null : recentVisits.first;
+}
+
+final _attendanceSnapshotProvider = FutureProvider.autoDispose<_AttendanceSnapshot>((ref) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    throw Exception('Not authenticated.');
+  }
+
+  final client = Supabase.instance.client;
+  final countResponse = await client
+      .from('check_ins')
+      .select(
+        'id',
+        const FetchOptions(
+          count: CountOption.exact,
+          head: true,
+        ),
+      )
+      .eq('user_id', user.id)
+      .timeout(const Duration(seconds: 10));
+
+  final total = countResponse.count ?? 0;
+
+  DateTime? first;
+  if (total > 0) {
+    final row = await client
+        .from('check_ins')
+        .select('checked_in_at')
+        .eq('user_id', user.id)
+        .order('checked_in_at', ascending: true)
+        .limit(1)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 10));
+    final raw = (row is Map<String, dynamic>) ? row['checked_in_at'] : null;
+    first = _parseTimestampToLocal(raw);
+  }
+
+  final recentRows = await client
+      .from('check_ins')
+      .select('checked_in_at')
+      .eq('user_id', user.id)
+      .order('checked_in_at', ascending: false)
+      .limit(5)
+      .timeout(const Duration(seconds: 10));
+
+  final recentList = recentRows is List ? recentRows : const [];
+  final recentVisits = recentList
+      .map((row) {
+        final map = row as Map<String, dynamic>;
+        return _parseTimestampToLocal(map['checked_in_at']);
+      })
+      .whereType<DateTime>()
+      .toList(growable: false);
+
+  return _AttendanceSnapshot(
+    totalCheckIns: total,
+    firstCheckInAt: first,
+    recentVisits: recentVisits,
+  );
+});
+
+DateTime? _parseTimestampToLocal(Object? raw) {
+  return switch (raw) {
+    final String v => DateTime.tryParse(v)?.toLocal(),
+    final DateTime v => v.toLocal(),
+    _ => null,
+  };
+}
+
+String _formatLocalDate(DateTime date) {
+  const months = <String>[
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final monthName = (date.month >= 1 && date.month <= 12) ? months[date.month - 1] : '';
+  return '$monthName ${date.day}, ${date.year}';
+}
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -80,12 +188,32 @@ class ProfileScreen extends ConsumerWidget {
         child: asyncProfile.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) => Center(
-            child: Text(
-              'Failed to load profile.\n${error.toString()}',
-              textAlign: TextAlign.center,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'We couldn’t load your profile.\nPlease try again.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    error.toString(),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => ref.refresh(_profileProvider),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
             ),
           ),
           data: (profile) {
+            final asyncAttendance = ref.watch(_attendanceSnapshotProvider);
             final userId = Supabase.instance.client.auth.currentUser?.id ?? profile.id;
             final authEmail = Supabase.instance.client.auth.currentUser?.email ?? '';
             final displayEmail = profile.email.isEmpty ? authEmail : profile.email;
@@ -99,7 +227,66 @@ class ProfileScreen extends ConsumerWidget {
                 _Row(label: 'Email', value: displayEmail.isEmpty ? '—' : displayEmail),
                 const SizedBox(height: 8),
                 _Row(label: 'Belt', value: profile.belt.isEmpty ? '—' : profile.belt),
+                const SizedBox(height: 16),
+                Text(
+                  'Attendance',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
+                asyncAttendance.when(
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                  error: (error, _) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'We couldn’t load your attendance snapshot.',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(error.toString()),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: () => ref.refresh(_attendanceSnapshotProvider),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  data: (snapshot) {
+                    if (snapshot.totalCheckIns == 0) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'No check-ins yet.',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      );
+                    }
+
+                    final memberSince = snapshot.firstCheckInAt == null ? '—' : _formatLocalDate(snapshot.firstCheckInAt!);
+                    final lastVisit = snapshot.lastVisitAt == null ? '—' : _formatLocalDate(snapshot.lastVisitAt!);
+                    final recent = snapshot.recentVisits.map(_formatLocalDate).join(', ');
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Row(label: 'Total', value: snapshot.totalCheckIns.toString()),
+                        const SizedBox(height: 8),
+                        _Row(label: 'Member since', value: memberSince),
+                        const SizedBox(height: 8),
+                        _Row(label: 'Last visit', value: lastVisit),
+                        const SizedBox(height: 8),
+                        _Row(label: 'Recent', value: recent.isEmpty ? '—' : recent),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
                 _Row(label: 'User ID', value: userId),
               ],
             );
