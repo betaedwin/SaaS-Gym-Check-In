@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:postgrest/postgrest.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/date_formatting.dart';
 import '../../core/logging.dart';
+import 'training_snapshot_share.dart';
 
 class _Profile {
   const _Profile({
@@ -66,7 +68,8 @@ class _AttendanceSnapshot {
   DateTime? get lastVisitAt => recentVisits.isEmpty ? null : recentVisits.first;
 }
 
-final _attendanceSnapshotProvider = FutureProvider.autoDispose<_AttendanceSnapshot>((ref) async {
+final _attendanceSnapshotProvider =
+    FutureProvider.autoDispose<_AttendanceSnapshot>((ref) async {
   final user = Supabase.instance.client.auth.currentUser;
   if (user == null) {
     throw Exception('Not authenticated.');
@@ -75,17 +78,11 @@ final _attendanceSnapshotProvider = FutureProvider.autoDispose<_AttendanceSnapsh
   final client = Supabase.instance.client;
   final countResponse = await client
       .from('check_ins')
-      .select(
-        'id',
-        const FetchOptions(
-          count: CountOption.exact,
-          head: true,
-        ),
-      )
+      .select('id')
       .eq('user_id', user.id)
+      .count(CountOption.exact)
       .timeout(const Duration(seconds: 10));
-
-  final total = countResponse.count ?? 0;
+  final total = countResponse.count;
 
   DateTime? first;
   if (total > 0) {
@@ -125,31 +122,23 @@ final _attendanceSnapshotProvider = FutureProvider.autoDispose<_AttendanceSnapsh
   );
 });
 
+class _IsPreparingSnapshotNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void setPreparing(bool value) => state = value;
+}
+
+final _isPreparingSnapshotProvider =
+    NotifierProvider.autoDispose<_IsPreparingSnapshotNotifier, bool>(
+        _IsPreparingSnapshotNotifier.new);
+
 DateTime? _parseTimestampToLocal(Object? raw) {
   return switch (raw) {
     final String v => DateTime.tryParse(v)?.toLocal(),
     final DateTime v => v.toLocal(),
     _ => null,
   };
-}
-
-String _formatLocalDate(DateTime date) {
-  const months = <String>[
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  final monthName = (date.month >= 1 && date.month <= 12) ? months[date.month - 1] : '';
-  return '$monthName ${date.day}, ${date.year}';
 }
 
 class ProfileScreen extends ConsumerWidget {
@@ -168,9 +157,64 @@ class ProfileScreen extends ConsumerWidget {
     }
   }
 
+  Future<void> _shareTrainingSnapshot(
+    BuildContext context,
+    WidgetRef ref, {
+    required String memberName,
+  }) async {
+    if (memberName.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Unable to generate snapshot. Please try again.')),
+      );
+      return;
+    }
+
+    ref.read(_isPreparingSnapshotProvider.notifier).setPreparing(true);
+    var dialogPopped = false;
+    final accentColor = Theme.of(context).colorScheme.primary;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _BlockingDialog(message: 'Preparing snapshot…'),
+    );
+
+    try {
+      final snapshot = await ref.read(_attendanceSnapshotProvider.future);
+      final xFile = await buildTrainingSnapshotXFile(
+        memberName: memberName,
+        memberSince: snapshot.firstCheckInAt,
+        totalCheckIns: snapshot.totalCheckIns,
+        accentColor: accentColor,
+      );
+
+      if (!context.mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      dialogPopped = true;
+      await SharePlus.instance.share(
+        ShareParams(files: [xFile]),
+      );
+    } catch (e, st) {
+      logError('Share snapshot failed', e, st);
+      if (context.mounted) {
+        if (!dialogPopped) {
+          Navigator.of(context, rootNavigator: true).pop();
+          dialogPopped = true;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Unable to generate snapshot. Please try again.')),
+        );
+      }
+    } finally {
+      ref.read(_isPreparingSnapshotProvider.notifier).setPreparing(false);
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncProfile = ref.watch(_profileProvider);
+    final isPreparingSnapshot = ref.watch(_isPreparingSnapshotProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -214,9 +258,12 @@ class ProfileScreen extends ConsumerWidget {
           ),
           data: (profile) {
             final asyncAttendance = ref.watch(_attendanceSnapshotProvider);
-            final userId = Supabase.instance.client.auth.currentUser?.id ?? profile.id;
-            final authEmail = Supabase.instance.client.auth.currentUser?.email ?? '';
-            final displayEmail = profile.email.isEmpty ? authEmail : profile.email;
+            final userId =
+                Supabase.instance.client.auth.currentUser?.id ?? profile.id;
+            final authEmail =
+                Supabase.instance.client.auth.currentUser?.email ?? '';
+            final displayEmail =
+                profile.email.isEmpty ? authEmail : profile.email;
             return ListView(
               children: [
                 Text(
@@ -224,9 +271,13 @@ class ProfileScreen extends ConsumerWidget {
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 12),
-                _Row(label: 'Email', value: displayEmail.isEmpty ? '—' : displayEmail),
+                _Row(
+                    label: 'Email',
+                    value: displayEmail.isEmpty ? '—' : displayEmail),
                 const SizedBox(height: 8),
-                _Row(label: 'Belt', value: profile.belt.isEmpty ? '—' : profile.belt),
+                _Row(
+                    label: 'Belt',
+                    value: profile.belt.isEmpty ? '—' : profile.belt),
                 const SizedBox(height: 16),
                 Text(
                   'Attendance',
@@ -251,7 +302,8 @@ class ProfileScreen extends ConsumerWidget {
                         Text(error.toString()),
                         const SizedBox(height: 12),
                         FilledButton(
-                          onPressed: () => ref.refresh(_attendanceSnapshotProvider),
+                          onPressed: () =>
+                              ref.refresh(_attendanceSnapshotProvider),
                           child: const Text('Retry'),
                         ),
                       ],
@@ -268,23 +320,43 @@ class ProfileScreen extends ConsumerWidget {
                       );
                     }
 
-                    final memberSince = snapshot.firstCheckInAt == null ? '—' : _formatLocalDate(snapshot.firstCheckInAt!);
-                    final lastVisit = snapshot.lastVisitAt == null ? '—' : _formatLocalDate(snapshot.lastVisitAt!);
-                    final recent = snapshot.recentVisits.map(_formatLocalDate).join(', ');
+                    final memberSince = snapshot.firstCheckInAt == null
+                        ? '—'
+                        : formatLocalDate(snapshot.firstCheckInAt!);
+                    final lastVisit = snapshot.lastVisitAt == null
+                        ? '—'
+                        : formatLocalDate(snapshot.lastVisitAt!);
+                    final recent =
+                        snapshot.recentVisits.map(formatLocalDate).join(', ');
 
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _Row(label: 'Total', value: snapshot.totalCheckIns.toString()),
+                        _Row(
+                            label: 'Total',
+                            value: snapshot.totalCheckIns.toString()),
                         const SizedBox(height: 8),
                         _Row(label: 'Member since', value: memberSince),
                         const SizedBox(height: 8),
                         _Row(label: 'Last visit', value: lastVisit),
                         const SizedBox(height: 8),
-                        _Row(label: 'Recent', value: recent.isEmpty ? '—' : recent),
+                        _Row(
+                            label: 'Recent',
+                            value: recent.isEmpty ? '—' : recent),
                       ],
                     );
                   },
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: isPreparingSnapshot
+                      ? null
+                      : () => _shareTrainingSnapshot(
+                            context,
+                            ref,
+                            memberName: profile.fullName,
+                          ),
+                  child: const Text('Share training snapshot'),
                 ),
                 const SizedBox(height: 16),
                 _Row(label: 'User ID', value: userId),
@@ -292,6 +364,30 @@ class ProfileScreen extends ConsumerWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _BlockingDialog extends StatelessWidget {
+  const _BlockingDialog({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      content: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Flexible(child: Text(message)),
+        ],
       ),
     );
   }

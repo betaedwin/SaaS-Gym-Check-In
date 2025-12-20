@@ -13,6 +13,8 @@ dependencies:
   flutter_riverpod: any
   geolocator: any
   mobile_scanner: any
+  path_provider: any
+  share_plus: any
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +23,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - web/icons/Icon-512.png
