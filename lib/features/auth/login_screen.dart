@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/logging.dart';
+import '../../core/ui/app_style.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -67,10 +68,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final styles = AppTextStyles(Theme.of(context));
     return Scaffold(
       appBar: AppBar(title: const Text('Login')),
       body: SafeArea(
-        minimum: const EdgeInsets.all(16),
+        minimum: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.screenPaddingH,
+          vertical: AppSpacing.screenPaddingV,
+        ),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
@@ -83,19 +88,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   autofillHints: const [AutofillHints.email],
                   textInputAction: TextInputAction.next,
+                  style: styles.primary,
                   decoration: const InputDecoration(labelText: 'Email'),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.standard),
                 TextField(
                   controller: _passwordController,
                   obscureText: true,
                   autofillHints: const [AutofillHints.password],
                   textInputAction: TextInputAction.done,
                   onSubmitted: (_) => _isLoading ? null : _login(),
+                  style: styles.primary,
                   decoration: const InputDecoration(labelText: 'Password'),
                 ),
-                const SizedBox(height: 16),
-                ElevatedButton(
+                const SizedBox(height: AppSpacing.rowGap),
+                FilledButton(
                   onPressed: _isLoading ? null : _login,
                   child: _isLoading
                       ? const SizedBox(

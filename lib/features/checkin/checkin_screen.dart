@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/ui/app_style.dart';
 import 'qr_scan_screen.dart';
 
 class CheckInScreen extends StatefulWidget {
@@ -271,21 +272,25 @@ class _CheckInScreenState extends State<CheckInScreen> {
     final denied = _attemptedLocationRequest &&
         (_locationPermission == LocationPermission.denied ||
             _locationPermission == LocationPermission.deniedForever);
+    final styles = AppTextStyles(Theme.of(context));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Check-In')),
       body: SafeArea(
-        minimum: const EdgeInsets.all(16),
+        minimum: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.screenPaddingH,
+          vertical: AppSpacing.screenPaddingV,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_status != null) ...[
               Text(
                 _status!,
-                style: Theme.of(context).textTheme.titleMedium,
+                style: styles.primary,
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpacing.loose),
             ],
             if (!denied)
               FilledButton(
@@ -302,8 +307,9 @@ class _CheckInScreenState extends State<CheckInScreen> {
               Text(
                 'Location permission is required for GPS check-in.\nScan the gym QR code instead.',
                 textAlign: TextAlign.center,
+                style: styles.secondary,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.standard),
               FilledButton(
                 onPressed: _loading ? null : _checkInViaQr,
                 child: _loading
@@ -315,12 +321,14 @@ class _CheckInScreenState extends State<CheckInScreen> {
                     : const Text('Scan QR Code'),
               ),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.loose),
+            const AppHairlineDivider(),
+            const SizedBox(height: AppSpacing.standard),
             Text(
               'Recent check-ins',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: styles.sectionTitle,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.standard),
             Expanded(
               child: FutureBuilder<List<_CheckInHistoryItem>>(
                 future: _historyFuture,
@@ -339,7 +347,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                     return Center(
                       child: Text(
                         'Unable to load check-in history.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: styles.secondary,
                         textAlign: TextAlign.center,
                       ),
                     );
@@ -350,7 +358,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                     return Center(
                       child: Text(
                         'Log in to see your check-in history.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: styles.secondary,
                         textAlign: TextAlign.center,
                       ),
                     );
@@ -361,7 +369,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
                     return Center(
                       child: Text(
                         'No check-ins yet.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: styles.secondary,
                         textAlign: TextAlign.center,
                       ),
                     );
@@ -369,7 +377,10 @@ class _CheckInScreenState extends State<CheckInScreen> {
 
                   return ListView.separated(
                     itemCount: items.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, __) => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: AppSpacing.standard),
+                      child: AppHairlineDivider(),
+                    ),
                     itemBuilder: (context, index) {
                       final item = items[index];
                       final methodLabel = switch (item.method) {
@@ -378,12 +389,18 @@ class _CheckInScreenState extends State<CheckInScreen> {
                         _ => item.method.toUpperCase(),
                       };
 
-                      return ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Checked in'),
-                        subtitle: Text(
-                          '${_formatDateLabel(item.checkedInAt)} • ${_formatTimeLabel(item.checkedInAt)} • $methodLabel',
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Checked in', style: styles.secondary),
+                            const SizedBox(height: AppSpacing.tight),
+                            Text(
+                              '${_formatDateLabel(item.checkedInAt)} • ${_formatTimeLabel(item.checkedInAt)} • $methodLabel',
+                              style: styles.primary,
+                            ),
+                          ],
                         ),
                       );
                     },

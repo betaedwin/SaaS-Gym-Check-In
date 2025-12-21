@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/logging.dart';
+import '../../core/ui/app_style.dart';
 
 class _ScheduleClass {
   const _ScheduleClass({
@@ -70,28 +71,33 @@ class ScheduleScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final styles = AppTextStyles(Theme.of(context));
     final asyncSchedule = ref.watch(_scheduleProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Schedule')),
       body: SafeArea(
-        minimum: const EdgeInsets.all(16),
+        minimum: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.screenPaddingH,
+          vertical: AppSpacing.screenPaddingV,
+        ),
         child: asyncSchedule.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) => Center(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpacing.screenPaddingH),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     'We couldn’t load the schedule.\nPlease try again.',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: styles.primary,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
                   Text(
                     error.toString(),
+                    style: styles.tertiaryValue,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 12),
@@ -108,7 +114,7 @@ class ScheduleScreen extends ConsumerWidget {
               return Center(
                 child: Text(
                   'No classes scheduled yet.',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  style: styles.secondary,
                   textAlign: TextAlign.center,
                 ),
               );
@@ -116,7 +122,10 @@ class ScheduleScreen extends ConsumerWidget {
 
             return ListView.separated(
               itemCount: items.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, __) => const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.standard),
+                child: AppHairlineDivider(),
+              ),
               itemBuilder: (context, index) {
                 final item = items[index];
                 final timeLine = _formatTimeRange(
@@ -130,11 +139,22 @@ class ScheduleScreen extends ConsumerWidget {
                   if (item.category != null) 'Category: ${item.category}',
                 ];
 
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(item.title),
-                  subtitle: Text(
-                    [timeLine, ...detailLines].join('\n'),
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.title, style: styles.primary),
+                      const SizedBox(height: AppSpacing.tight),
+                      Text(timeLine, style: styles.primarySoft),
+                      if (detailLines.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.standard),
+                        Text(
+                          detailLines.join('\n'),
+                          style: styles.tertiaryValue,
+                        ),
+                      ],
+                    ],
                   ),
                 );
               },

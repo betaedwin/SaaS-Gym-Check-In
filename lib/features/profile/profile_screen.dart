@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/date_formatting.dart';
 import '../../core/logging.dart';
+import '../../core/ui/app_style.dart';
 import 'training_snapshot_share.dart';
 
 class _Profile {
@@ -106,12 +107,8 @@ final _attendanceSnapshotProvider =
       .limit(5)
       .timeout(const Duration(seconds: 10));
 
-  final recentList = recentRows is List ? recentRows : const [];
-  final recentVisits = recentList
-      .map((row) {
-        final map = row as Map<String, dynamic>;
-        return _parseTimestampToLocal(map['checked_in_at']);
-      })
+  final recentVisits = recentRows
+      .map((row) => _parseTimestampToLocal(row['checked_in_at']))
       .whereType<DateTime>()
       .toList(growable: false);
 
@@ -143,6 +140,8 @@ DateTime? _parseTimestampToLocal(Object? raw) {
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
+
+  static const _gymLogoAssetPath = 'web/icons/Icon-512.png';
 
   Future<void> _logout(BuildContext context) async {
     try {
@@ -213,10 +212,14 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final styles = AppTextStyles(theme);
+
     final asyncProfile = ref.watch(_profileProvider);
     final isPreparingSnapshot = ref.watch(_isPreparingSnapshotProvider);
 
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: const Text('Profile'),
         actions: [
@@ -228,7 +231,10 @@ class ProfileScreen extends ConsumerWidget {
         ],
       ),
       body: SafeArea(
-        minimum: const EdgeInsets.all(16),
+        minimum: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.screenPaddingH,
+          vertical: AppSpacing.screenPaddingV,
+        ),
         child: asyncProfile.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) => Center(
@@ -265,25 +271,27 @@ class ProfileScreen extends ConsumerWidget {
             final displayEmail =
                 profile.email.isEmpty ? authEmail : profile.email;
             return ListView(
+              padding: EdgeInsets.zero,
               children: [
-                Text(
-                  profile.fullName.isEmpty ? 'Unknown user' : profile.fullName,
-                  style: Theme.of(context).textTheme.headlineSmall,
+                _IdentityBlock(
+                  name: profile.fullName.isEmpty
+                      ? 'Unknown user'
+                      : profile.fullName,
+                  email: displayEmail.isEmpty ? '—' : displayEmail,
+                  belt: profile.belt.isEmpty ? '—' : profile.belt,
+                  styles: styles,
+                  logo: const _GymLogo(assetPath: _gymLogoAssetPath),
                 ),
-                const SizedBox(height: 12),
-                _Row(
-                    label: 'Email',
-                    value: displayEmail.isEmpty ? '—' : displayEmail),
-                const SizedBox(height: 8),
-                _Row(
-                    label: 'Belt',
-                    value: profile.belt.isEmpty ? '—' : profile.belt),
-                const SizedBox(height: 16),
+                const SizedBox(height: _ProfileSpacing.blockGap),
+                AppHairlineDivider(
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
+                ),
+                const SizedBox(height: _ProfileSpacing.blockGap),
                 Text(
                   'Attendance',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: styles.sectionTitle,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: _ProfileSpacing.sectionGap),
                 asyncAttendance.when(
                   loading: () => const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
@@ -312,10 +320,10 @@ class ProfileScreen extends ConsumerWidget {
                   data: (snapshot) {
                     if (snapshot.totalCheckIns == 0) {
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: const EdgeInsets.only(top: _ProfileSpacing.sectionGap),
                         child: Text(
                           'No check-ins yet.',
-                          style: Theme.of(context).textTheme.bodyLarge,
+                          style: styles.primary,
                         ),
                       );
                     }
@@ -332,23 +340,52 @@ class ProfileScreen extends ConsumerWidget {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _Row(
-                            label: 'Total',
-                            value: snapshot.totalCheckIns.toString()),
-                        const SizedBox(height: 8),
-                        _Row(label: 'Member since', value: memberSince),
-                        const SizedBox(height: 8),
-                        _Row(label: 'Last visit', value: lastVisit),
-                        const SizedBox(height: 8),
-                        _Row(
-                            label: 'Recent',
-                            value: recent.isEmpty ? '—' : recent),
+                        _LabeledValue(
+                          label: 'Member since',
+                          value: memberSince,
+                          labelStyle: styles.secondary,
+                          valueStyle: styles.primary,
+                        ),
+                        const SizedBox(height: _ProfileSpacing.factGap),
+                        _LabeledValue(
+                          label: 'Total check-ins',
+                          value: snapshot.totalCheckIns.toString(),
+                          labelStyle: styles.secondary,
+                          valueStyle: styles.primary,
+                        ),
+                        const SizedBox(height: _ProfileSpacing.factGap),
+                        _LabeledValue(
+                          label: 'Last visit',
+                          value: lastVisit,
+                          labelStyle: styles.secondary,
+                          valueStyle: styles.primary,
+                        ),
+                        const SizedBox(height: _ProfileSpacing.factGap),
+                        _LabeledValue(
+                          label: 'Recent activity',
+                          value: recent.isEmpty ? '—' : recent,
+                          labelStyle: styles.secondary,
+                          valueStyle: styles.tertiaryValue,
+                        ),
                       ],
                     );
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: _ProfileSpacing.blockGap),
                 OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor:
+                        theme.colorScheme.onSurface.withValues(alpha: 0.82),
+                    side: BorderSide(
+                      color: theme.colorScheme.outline.withValues(alpha: 0.55),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 14,
+                    ),
+                    minimumSize: const Size.fromHeight(44),
+                    textStyle: styles.actionText,
+                  ),
                   onPressed: isPreparingSnapshot
                       ? null
                       : () => _shareTrainingSnapshot(
@@ -358,8 +395,18 @@ class ProfileScreen extends ConsumerWidget {
                           ),
                   child: const Text('Share training snapshot'),
                 ),
-                const SizedBox(height: 16),
-                _Row(label: 'User ID', value: userId),
+                const SizedBox(height: _ProfileSpacing.blockGap),
+                AppHairlineDivider(
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
+                ),
+                const SizedBox(height: _ProfileSpacing.sectionGap),
+                _LabeledValue(
+                  label: 'User ID',
+                  value: userId,
+                  labelStyle: styles.tertiaryLabel,
+                  valueStyle: styles.tertiaryValue,
+                ),
+                const SizedBox(height: _ProfileSpacing.sectionGap),
               ],
             );
           },
@@ -393,25 +440,106 @@ class _BlockingDialog extends StatelessWidget {
   }
 }
 
-class _Row extends StatelessWidget {
-  const _Row({required this.label, required this.value});
+class _ProfileSpacing {
+  static const double labelToValueGap = AppSpacing.tight;
+  static const double factGap = AppSpacing.rowGap;
+  static const double sectionGap = AppSpacing.standard;
+  static const double blockGap = AppSpacing.loose;
+}
 
-  final String label;
-  final String value;
+class _GymLogo extends StatelessWidget {
+  const _GymLogo({required this.assetPath});
+
+  final String assetPath;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Opacity(
+      opacity: 0.16,
+      child: Image.asset(
+        assetPath,
+        width: 26,
+        height: 26,
+        fit: BoxFit.contain,
+        color: onSurface,
+        colorBlendMode: BlendMode.srcIn,
+        filterQuality: FilterQuality.low,
+      ),
+    );
+  }
+}
+
+class _IdentityBlock extends StatelessWidget {
+  const _IdentityBlock({
+    required this.name,
+    required this.email,
+    required this.belt,
+    required this.styles,
+    required this.logo,
+  });
+
+  final String name;
+  final String email;
+  final String belt;
+  final AppTextStyles styles;
+  final Widget logo;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: 80,
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
+        logo,
+        const SizedBox(height: _ProfileSpacing.labelToValueGap),
+        Text(name, style: styles.display),
+        const SizedBox(height: _ProfileSpacing.sectionGap),
+        _LabeledValue(
+          label: 'Email',
+          value: email,
+          labelStyle: styles.secondary,
+          valueStyle: styles.primarySoft,
         ),
-        Expanded(child: Text(value)),
+        const SizedBox(height: _ProfileSpacing.factGap),
+        _LabeledValue(
+          label: 'Belt',
+          value: belt,
+          labelStyle: styles.secondary,
+          valueStyle: styles.primarySoft,
+        ),
+      ],
+    );
+  }
+}
+
+class _LabeledValue extends StatelessWidget {
+  const _LabeledValue({
+    required this.label,
+    required this.value,
+    this.labelStyle,
+    this.valueStyle,
+  });
+
+  final String label;
+  final String value;
+  final TextStyle? labelStyle;
+  final TextStyle? valueStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: labelStyle ?? Theme.of(context).textTheme.labelMedium,
+        ),
+        const SizedBox(height: _ProfileSpacing.labelToValueGap),
+        Text(
+          value,
+          style: valueStyle ?? Theme.of(context).textTheme.bodyLarge,
+          softWrap: true,
+        ),
       ],
     );
   }
